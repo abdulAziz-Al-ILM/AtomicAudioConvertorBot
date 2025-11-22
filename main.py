@@ -306,6 +306,8 @@ async def req_audio(message: types.Message, state: FSMContext):
 
 # --- main.py (get_file funksiyasini TOPING va to'liq almashtiring) ---
 
+# --- main.py (get_file funksiyasini TOPING va to'liq almashtiring) ---
+
 @dp.message(ConverterState.wait_audio, F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
 async def get_file(message: types.Message, state: FSMContext):
     
@@ -314,22 +316,33 @@ async def get_file(message: types.Message, state: FSMContext):
     
     uid = message.from_user.id
     # 1. THROTTLING CHECK
-    if uid in THROTTLE_CACHE and (now - THROTTLE_CACHE[uid]) < THROTTLE_LIMIT:
-        wait = int(THROTTLE_LIMIT - (now - THROTTLE_CACHE[uid]))
-        return await message.answer(f"✋ Shoshmang do'stim, yana {wait} soniya kuting.")
-    THROTTLE_CACHE[uid] = now
+    if uid in THROTTLE_CACHE and (time.time() - THROTTLE_CACHE[uid]) < THROTTLE_LIMIT:
+        return await message.answer(f"✋ Juda tez. Iltimos, {THROTTLE_LIMIT} soniya kuting.") 
+    THROTTLE_CACHE[uid] = time.time()
     
     if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
 
-    # 2. FAYL TURINI ANIQLASH
-    if message.audio: fid, ext = message.audio.file_id, os.path.splitext(message.audio.file_name or "a.mp3")[-1]
-    elif message.voice: fid, ext = message.voice.file_id, ".ogg"
-    elif message.video: fid, ext = message.video.file_id, ".mp4"
-    elif message.document: fid, ext = message.document.file_id, os.path.splitext(message.document.file_name or "a.dat")[-1]
-    else: 
-        # ⚠️ DEBUG 2: Fayl turi mos kelmadi.
-        error_msg = f"Noto'g'ri fayl turi! Content Type: {message.content_type}"
-        return await message.answer(error_msg)
+    # 2. FAYL TURINI XAVFSIZ ANIQLASH
+    fid = None
+    ext = None
+    try:
+        if message.audio: 
+            fid, ext = message.audio.file_id, os.path.splitext(message.audio.file_name or "a.mp3")[-1]
+        elif message.voice: 
+            fid, ext = message.voice.file_id, ".ogg"
+        elif message.video: 
+            fid, ext = message.video.file_id, ".mp4"
+        elif message.document: 
+            fid, ext = message.document.file_id, os.path.splitext(message.document.file_name or "a.dat")[-1]
+        
+        if fid is None:
+             # Agar kontent turi aniqlangan lekin fid olinmagan bo'lsa (Masalan, surat)
+             error_msg = f"Noto'g'ri fayl turi aniqlandi! Content Type: {message.content_type}"
+             return await message.answer(error_msg)
+
+    except Exception as e:
+        # Fayl ID/Ext olishdagi har qanday kutilmagan xato
+        return await message.answer(f"❌ Fayl identifikatsiyasi xatosi: {e}") 
 
     path = os.path.join(DOWNLOAD_DIR, f"{fid}_in{ext}")
     
@@ -341,18 +354,16 @@ async def get_file(message: types.Message, state: FSMContext):
         file = await bot.get_file(fid)
         await bot.download_file(file.file_path, path)
         
-        # Limitlarni tekshirish uchun faylni PyDub yordamida yuklab olish kerak
+        # Limitlarni tekshirish
         status, _, _, _ = await check_limits(uid)
         
-        # ⚠️ PyDub xato berishi mumkin
+        # PyDub bilan uzunlikni tekshirish
         try:
             segment = AudioSegment.from_file(path)
             dur = len(segment) / 1000
         except Exception:
-             # Agar PyDub o'qiy olmasa
              os.remove(path)
-             return await message.answer("❌ Fayl sifati past yoki buzilgan. Konvertatsiya qilish imkonsiz.")
-
+             return await message.answer("❌ Fayl sifati past yoki buzilgan.")
 
         if dur > LIMITS[status]['duration']:
             os.remove(path)
@@ -367,7 +378,6 @@ async def get_file(message: types.Message, state: FSMContext):
     await state.update_data(path=path)
     await message.answer("Formatni tanlang:", reply_markup=format_kb())
     await state.set_state(ConverterState.wait_format)
-
 @dp.callback_query(ConverterState.wait_format, F.data.startswith("fmt_"))
 async def process(call: types.CallbackQuery, state: FSMContext):
     fmt = call.data.split("_")[1]
