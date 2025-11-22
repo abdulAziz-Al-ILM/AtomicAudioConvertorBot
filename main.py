@@ -98,7 +98,9 @@ async def update_usage(telegram_id):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE users SET daily_usage = daily_usage + 1 WHERE telegram_id = ?", (telegram_id,))
         await db.commit()
-
+    
+    # DEBUG UCHUN QO'SHILDI
+    logging.info(f"🟢 [USAGE] Foydalanuvchi {telegram_id} uchun hisob yangilandi.")
 # --- BOT ---
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
