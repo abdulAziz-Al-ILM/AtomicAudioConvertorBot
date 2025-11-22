@@ -5,89 +5,158 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-# TUZATISH: ContentType qo'shildi 👇
 from aiogram.types import FSInputFile, LabeledPrice, PreCheckoutQuery, ContentType
-import aiosqlite
 from pydub import AudioSegment
+import asyncpg
 
-# --- SOZLAMALAR (Railway Variables) ---
+# --- SOZLAMALAR ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "SIZNING_BOT_TOKEN")
 PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "CLICK_TOKEN") 
-# Agar admin kerak bo'lsa
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@host/dbname") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 
-DB_NAME = "converter_bot.db"
 DOWNLOAD_DIR = "converts"
 
-# FORMATLAR
+# FORMATLAR, LIMITLAR
 TARGET_FORMATS = ["MP3", "WAV", "FLAC", "OGG", "M4A", "AIFF"]
 FORMAT_EXTENSIONS = {f: f.lower() for f in TARGET_FORMATS}
-
-# XAVFSIZLIK
 THROTTLE_CACHE = {} 
 THROTTLE_LIMIT = 15 
-
-# LIMITLAR VA NARXLAR
 LIMITS = {
-    "free": {"daily": 3, "duration": 20},     # 20 soniya
-    "plus": {"daily": 15, "duration": 120},   # 2 daqiqa
-    "pro": {"daily": 30, "duration": 480}     # 8 daqiqa
+    "free": {"daily": 3, "duration": 20},
+    "plus": {"daily": 15, "duration": 120},
+    "pro": {"daily": 30, "duration": 480}
 }
+# Asosiy narxlar (Chegirmasiz)
+BASE_PRICE_PLUS = 15000 * 100
+BASE_PRICE_PRO = 30000 * 100
 
-PRICE_PLUS = 15000 * 100
-PRICE_PRO = 30000 * 100
+db_pool = None
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
-# --- DATABASE ---
+# --- TIZIM FUNKSIYALARI ---
+
+def clean_download_dir():
+    if os.path.exists(DOWNLOAD_DIR):
+        for filename in os.listdir(DOWNLOAD_DIR):
+            file_path = os.path.join(DOWNLOAD_DIR, filename)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                logging.error(f"Faylni o'chirishda xato {file_path}: {e}")
+
+def apply_discount(base_price, discount_percent):
+    discount_factor = 1 - (discount_percent / 100)
+    return int(base_price * discount_factor)
+
+# --- DATABASE MANTIQI (POSTGRESQL) ---
+
 async def init_db():
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
+    global db_pool
+    logging.info("PostgreSQLga ulanmoqda...")
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                telegram_id INTEGER PRIMARY KEY,
+                telegram_id BIGINT PRIMARY KEY,
                 status TEXT DEFAULT 'free',
-                sub_end_date TEXT,
+                sub_end_date TIMESTAMP,
                 daily_usage INTEGER DEFAULT 0,
-                last_usage_date TEXT
+                last_usage_date DATE,
+                referrer_id BIGINT DEFAULT NULL
             )
         """)
-        await db.commit()
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT REFERENCES users(telegram_id),
+                amount INTEGER NOT NULL, 
+                payload TEXT NOT NULL,
+                payment_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        # Default chegirma 0
+        await conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('discount_percent', '0') ON CONFLICT (key) DO NOTHING"
+        )
+    logging.info("PostgreSQLga ulanish muvaffaqiyatli.")
+
+async def get_setting(key):
+    async with db_pool.acquire() as conn:
+        record = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
+        return record['value'] if record else None
+
+async def set_setting(key, value):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+            key, value
+        )
 
 async def get_user(telegram_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)) as cursor:
-            return await cursor.fetchone()
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
 
-async def register_user(telegram_id):
-    today = datetime.now().date().isoformat()
-    async with aiosqlite.connect(DB_NAME) as db:
-        try:
-            await db.execute("INSERT INTO users (telegram_id, last_usage_date) VALUES (?, ?)", (telegram_id, today))
-            await db.commit()
-        except aiosqlite.IntegrityError: pass
+async def grant_referral_bonus(referrer_id):
+    new_end_date = datetime.now() + timedelta(days=1)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET status = 'plus', sub_end_date = $1 WHERE telegram_id = $2 AND status != 'pro'", 
+            new_end_date, referrer_id
+        )
+
+async def register_user(telegram_id, referrer_id=None):
+    today = datetime.now().date()
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            "INSERT INTO users (telegram_id, last_usage_date) VALUES ($1, $2) ON CONFLICT (telegram_id) DO NOTHING", 
+            telegram_id, today
+        )
+        if result == 'INSERT 0 1': 
+            if referrer_id and referrer_id != telegram_id:
+                referrer = await conn.fetchrow("SELECT telegram_id FROM users WHERE telegram_id = $1", referrer_id)
+                if referrer:
+                    await conn.execute("UPDATE users SET referrer_id = $1 WHERE telegram_id = $2", referrer_id, telegram_id)
+                    await grant_referral_bonus(referrer_id)
+                    try:
+                        await bot.send_message(referrer_id, "🎁 **Tabriklaymiz!** Sizga **1 kunlik PLUS** obunasi berildi!")
+                    except Exception: pass
 
 async def check_limits(telegram_id):
-    today = datetime.now().date().isoformat()
+    today = datetime.now().date()
     user = await get_user(telegram_id)
-    if not user: return 'free', 0, LIMITS['free']['daily'], False
     
-    status, sub_end, usage, last_date = user[1], user[2], user[3], user[4]
-    
-    # Obuna muddati tugaganini tekshirish
-    if status in ['plus', 'pro'] and sub_end:
-        if datetime.now() > datetime.fromisoformat(sub_end):
-            async with aiosqlite.connect(DB_NAME) as db:
-                await db.execute("UPDATE users SET status = 'free', sub_end_date = NULL WHERE telegram_id = ?", (telegram_id,))
-                await db.commit()
-            status = 'free'
+    if not user:
+        await register_user(telegram_id)
+        user = await get_user(telegram_id)
+        if not user: return 'free', 0, LIMITS['free']['daily'], False
 
-    # Kunlik limitni yangilash
-    if last_date != today:
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("UPDATE users SET daily_usage = 0, last_usage_date = ? WHERE telegram_id = ?", (today, telegram_id))
-            await db.commit()
+    status = user['status']
+    sub_end = user['sub_end_date']
+    usage = user['daily_usage']
+    last_date = user['last_usage_date']
+
+    if status in ['plus', 'pro'] and sub_end and datetime.now() > sub_end:
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET status = 'free', sub_end_date = NULL WHERE telegram_id = $1", telegram_id)
+        status = 'free'
+
+    if last_date and last_date < today:
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET daily_usage = 0, last_usage_date = $1 WHERE telegram_id = $2", today, telegram_id)
         usage = 0
 
     max_limit = LIMITS[status]['daily']
@@ -95,27 +164,36 @@ async def check_limits(telegram_id):
     return status, usage, max_limit, is_limited
 
 async def update_usage(telegram_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET daily_usage = daily_usage + 1 WHERE telegram_id = ?", (telegram_id,))
-        await db.commit()
-    
-    # DEBUG UCHUN QO'SHILDI
-    logging.info(f"🟢 [USAGE] Foydalanuvchi {telegram_id} uchun hisob yangilandi.")
-# --- BOT ---
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET daily_usage = daily_usage + 1 WHERE telegram_id = $1", telegram_id)
+
+async def get_user_count():
+    async with db_pool.acquire() as conn:
+        return await conn.fetchval("SELECT COUNT(*) FROM users")
+
+async def get_total_revenue():
+    async with db_pool.acquire() as conn:
+        total_tiyin = await conn.fetchval("SELECT SUM(amount) FROM payments")
+        return (total_tiyin or 0) / 100
+
+# --- STATES & KEYBOARDS ---
 
 class ConverterState(StatesGroup):
     wait_audio = State()
     wait_format = State()
+
+class AdminState(StatesGroup):
+    wait_message = State()
+    wait_discount = State() # YANGI STATE
 
 def main_kb():
     kb = ReplyKeyboardBuilder()
     kb.button(text="🎵 Konvertatsiya")
     kb.button(text="📊 Statistika")
     kb.button(text="🌟 Obuna olish")
+    kb.button(text="🔗 Referal havolasi")
     kb.button(text="📢 Reklama")
-    kb.adjust(1, 2)
+    kb.adjust(1, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def format_kb():
@@ -125,33 +203,84 @@ def format_kb():
     kb.adjust(3)
     return kb.as_markup()
 
+def admin_kb():
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="📈 Statistika")
+    kb.button(text="🏷 Chegirma o'rnatish") # YANGI TUGMA
+    kb.button(text="✉️ Xabar yuborish")
+    kb.button(text="❌ Asosiy menyu")
+    kb.adjust(1, 2, 1)
+    return kb.as_markup(resize_keyboard=True)
+
+# --- HANDLERS ---
+
 @dp.message(CommandStart())
 async def start(message: types.Message):
-    await register_user(message.from_user.id)
-    await message.answer(f"Salom, {message.from_user.first_name}!\n** ΛTOMIC • Audio Converter ** ga xush kelibsiz. \\\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
+    referrer_id = None
+    if message.text and len(message.text.split()) > 1:
+        try:
+            referrer_id = int(message.text.split()[1])
+            if referrer_id == message.from_user.id: referrer_id = None 
+        except ValueError: referrer_id = None
 
+    await register_user(message.from_user.id, referrer_id)
+    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n[ ΛTOMIC ] taqdim etadi. \n[ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz. \n 🌟 Plus  va  🚀 Pro bilan yanada keng imkoniyatlarga ega bo'ling. \\\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
+
+@dp.message(F.text == "📢 Reklama")
+async def ads_handler(message: types.Message):
+    await message.answer(f"Reklama bo'yicha adminga murojaat qiling: @Al_Abdul_Aziz")
+    
 @dp.message(F.text == "📊 Statistika")
 async def stats(message: types.Message):
     status, usage, max_limit, _ = await check_limits(message.from_user.id)
     max_dur = LIMITS[status]['duration']
-    await message.answer(f"👤 **Profil:**\n🏷 Status: **{status.upper()}**\n🔋 Limit: **{usage}/{max_limit}**\n⏱ Maks. uzunlik: **{max_dur}s**")
+    user_data = await get_user(message.from_user.id)
+    referrer_id = user_data['referrer_id'] if user_data and user_data['referrer_id'] else "Yo'q"
+    
+    await message.answer(
+        f"👤 **Profil:**\n🏷 Status: **{status.upper()}**\n🔋 Limit: **{usage}/{max_limit}**\n⏱ Maks. uzunlik: **{max_dur}s**\n🤝 Taklif qildi: **{referrer_id}**",
+    )
 
-# --- TO'LOV TIZIMI ---
+@dp.message(F.text == "🔗 Referal havolasi")
+async def send_referral_link(message: types.Message):
+    bot_info = await bot.get_me()
+    link = f"https://t.me/{bot_info.username}?start={message.from_user.id}"
+    await message.answer(f"👋 **Do'stlarni taklif qiling!**\nBonus: **1 kunlik PLUS obunasi**\n\n🔗 **Havola:**\n`{link}`", parse_mode="Markdown")
+
+# --- TO'LOV ---
 @dp.message(F.text == "🌟 Obuna olish")
 async def buy_menu(message: types.Message):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌟 PLUS (15 000 uzs)", callback_data="buy_plus")
-    kb.button(text="🚀 PRO (30 000 uzs)", callback_data="buy_pro")
+    disc_str = await get_setting('discount_percent')
+    disc = int(disc_str or 0)
+    
+    # Dinamik narxlar
+    price_plus = apply_discount(BASE_PRICE_PLUS, disc) / 100
+    price_pro = apply_discount(BASE_PRICE_PRO, disc) / 100
+    
+    kb.button(text=f"🌟 PLUS ({int(price_plus)} 000 uzs)", callback_data="buy_plus")
+    kb.button(text=f"🚀 PRO ({int(price_pro)}000 uzs)", callback_data="buy_pro")
     kb.adjust(1)
-    await message.answer("📦 **Tarifni tanlang:**\n\n🌟 **PLUS** (15 000 uzs/oy)\n• 15 ta fayl\n• 2 daqiqa\n\n🚀 **PRO** (30 000 uzs/oy)\n• 30 ta fayl\n• 8 daqiqa", reply_markup=kb.as_markup())
+    
+    msg = f"🎉 **{disc}% CHEGIRMA!**\n" if disc > 0 else ""
+    await message.answer(f"📦 **Tariflar:**\n\n{msg}🌟 **PLUS**\n• 15 fayl, 2 daqiqa\n\n🚀 **PRO**\n• 30 fayl, 8 daqiqa", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def invoice(call: types.CallbackQuery):
     plan = call.data.split("_")[1]
-    price = PRICE_PLUS if plan == "plus" else PRICE_PRO
     title = f"{plan.upper()} Obuna"
-    await bot.send_invoice(call.message.chat.id, title, "Audio Converter uchun obuna", f"sub_{plan}", PAYMENT_TOKEN, "UZS", [LabeledPrice(label="Obuna", amount=price)])
-    await call.answer()
+    payload = f"sub_{plan}"
+    
+    disc_str = await get_setting('discount_percent')
+    disc = int(disc_str or 0)
+    base = BASE_PRICE_PLUS if plan == "plus" else BASE_PRICE_PRO
+    price = apply_discount(base, disc)
+    
+    try:
+        await bot.send_invoice(call.message.chat.id, title, "Obuna", payload, PAYMENT_TOKEN, "UZS", [LabeledPrice(label="Obuna", amount=price)], start_parameter="sub_conv")
+        await call.answer() 
+    except Exception as e:
+        await call.answer("❌ Xatolik yuz berdi (Token yoki narx).", show_alert=True)
 
 @dp.pre_checkout_query()
 async def checkout(q: PreCheckoutQuery):
@@ -160,30 +289,24 @@ async def checkout(q: PreCheckoutQuery):
 @dp.message(F.successful_payment)
 async def paid(message: types.Message):
     status = "plus" if "plus" in message.successful_payment.invoice_payload else "pro"
-    end = (datetime.now() + timedelta(days=31)).isoformat()
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET status = ?, sub_end_date = ? WHERE telegram_id = ?", (status, end, message.from_user.id))
-        await db.commit()
-    await message.answer(f"✅ To'lov muvaffaqiyatli! Siz endi **{status.upper()}** a'zosisiz.")
+    end = datetime.now() + timedelta(days=31)
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT (telegram_id) DO NOTHING", message.from_user.id)
+        await conn.execute("INSERT INTO payments (telegram_id, amount, payload) VALUES ($1, $2, $3)", message.from_user.id, message.successful_payment.total_amount, message.successful_payment.invoice_payload)
+        await conn.execute("UPDATE users SET status = $1, sub_end_date = $2 WHERE telegram_id = $3", status, end, message.from_user.id)
+    await message.answer(f"✅ To'lov muvaffaqiyatli! Status: **{status.upper()}**")
 
 # --- KONVERTATSIYA ---
 @dp.message(F.text == "🎵 Konvertatsiya")
 async def req_audio(message: types.Message, state: FSMContext):
     status, usage, max_limit, is_limited = await check_limits(message.from_user.id)
-    if is_limited:
-        return await message.answer(f"😔 Limit tugadi ({usage}/{max_limit}). Obuna oling.")
-    await message.answer("Audio, Video yoki Ovozli xabar yuboring.")
+    if is_limited: return await message.answer(f"😔 Limit tugadi ({usage}/{max_limit}). Ertaga keling yoki obuna oling! \nAytgancha, do'stingizni taklif qilsangiz 1 kunlik 🌟 PLUS obunasiga ega bo'lasiz")
+    await message.answer("Faylni yuboring (Audio/Video).")
     await state.set_state(ConverterState.wait_audio)
-    
-@dp.message(F.text == "📢 Reklama")
-async def ads_handler(message: types.Message):
-    await message.answer(f"Reklama bo'yicha adminga murojaat qiling: @Al_Abdul_Aziz")
 
-# XATO SHU YERDA EDI, TUZATILDI 👇
 @dp.message(ConverterState.wait_audio, F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
 async def get_file(message: types.Message, state: FSMContext):
     uid = message.from_user.id
-    now = time.time()
     if uid in THROTTLE_CACHE and (now - THROTTLE_CACHE[uid]) < THROTTLE_LIMIT:
         wait = int(THROTTLE_LIMIT - (now - THROTTLE_CACHE[uid]))
         return await message.answer(f"✋ Shoshmang do'stim, yana {wait} soniya kuting.")
@@ -191,7 +314,6 @@ async def get_file(message: types.Message, state: FSMContext):
     
     if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
 
-    # Fayl turini aniqlash
     if message.audio: fid, ext = message.audio.file_id, os.path.splitext(message.audio.file_name or "a.mp3")[-1]
     elif message.voice: fid, ext = message.voice.file_id, ".ogg"
     elif message.video: fid, ext = message.video.file_id, ".mp4"
@@ -200,18 +322,14 @@ async def get_file(message: types.Message, state: FSMContext):
 
     path = os.path.join(DOWNLOAD_DIR, f"{fid}_in{ext}")
     await message.answer("📥 Yuklanmoqda...")
-    
     try:
         file = await bot.get_file(fid)
         await bot.download_file(file.file_path, path)
-        
-        # Uzunlikni tekshirish
         status, _, _, _ = await check_limits(uid)
         dur = len(AudioSegment.from_file(path)) / 1000
         if dur > LIMITS[status]['duration']:
             os.remove(path)
-            return await message.answer(f"⚠️ Fayl uzun ({int(dur)}s). Sizning limit: {LIMITS[status]['duration']}s.")
-            
+            return await message.answer(f"⚠️ Limit: {LIMITS[status]['duration']}s. Fayl: {int(dur)}s")
     except Exception as e:
         if os.path.exists(path): os.remove(path)
         return await message.answer(f"❌ Xatolik: {e}")
@@ -229,28 +347,84 @@ async def process(call: types.CallbackQuery, state: FSMContext):
     out_path = in_path.replace("_in", f"_out.{ext}")
     
     await call.message.edit_text(f"⏳ {fmt} ga o'girilmoqda...")
-    
     try:
         audio = AudioSegment.from_file(in_path)
-        # WAV/FLAC/AIFF = Lossless (PCM), others = compressed
         params = ["-acodec", "pcm_s16le"] if fmt in ["WAV", "FLAC", "AIFF"] else None
         audio.export(out_path, format=ext, parameters=params)
         
         res = FSInputFile(out_path)
         if fmt in ['MP4', 'OGG']: await bot.send_document(call.from_user.id, res, caption=f"✅ {fmt}")
         else: await bot.send_audio(call.from_user.id, res, caption=f"✅ {fmt}")
-        
         await update_usage(call.from_user.id)
         os.remove(out_path)
-    except:
-        await call.message.edit_text("❌ Konvertatsiya xatosi.")
-    
+    except: await call.message.edit_text("❌ Konvertatsiya xatosi.")
     if os.path.exists(in_path): os.remove(in_path)
     await call.message.delete()
     await state.clear()
 
+# --- ADMIN PANEL ---
+@dp.message(Command('admin'))
+async def cmd_admin(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return await message.answer("Admin emassiz.")
+    await message.answer("🔑 Admin Panel", reply_markup=admin_kb())
+
+@dp.message(F.text == "❌ Asosiy menyu")
+async def back_to_main_menu(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("Menyu.", reply_markup=main_kb())
+
+@dp.message(F.text == "📈 Statistika")
+async def admin_stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    users = await get_user_count()
+    rev = await get_total_revenue()
+    disc = await get_setting('discount_percent')
+    await message.answer(f"📊 Stats:\n👤 Userlar: {users}\n💰 Daromad: {rev} UZS\n🏷 Chegirma: {disc}%")
+
+@dp.message(F.text == "🏷 Chegirma o'rnatish")
+async def ask_discount(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    curr = await get_setting('discount_percent')
+    await message.answer(f"Joriy chegirma: {curr}%\nYangi foizni yozing (0-100). 0 = o'chirish.", reply_markup=ReplyKeyboardBuilder().button(text="❌ Asosiy menyu").as_markup(resize_keyboard=True))
+    await state.set_state(AdminState.wait_discount)
+
+@dp.message(AdminState.wait_discount)
+async def set_discount_handler(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if not message.text.isdigit(): return await message.answer("Raqam yozing.")
+    perc = int(message.text)
+    if not (0 <= perc <= 100): return await message.answer("0 dan 100 gacha bo'lsin.")
+    
+    await set_setting('discount_percent', str(perc))
+    await state.clear()
+    await message.answer(f"✅ Chegirma {perc}% ga o'zgartirildi.", reply_markup=admin_kb())
+
+@dp.message(F.text == "✉️ Xabar yuborish")
+async def broadcast_start(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Xabar matnini yozing.", reply_markup=ReplyKeyboardBuilder().button(text="❌ Asosiy menyu").as_markup(resize_keyboard=True))
+    await state.set_state(AdminState.wait_message)
+
+@dp.message(AdminState.wait_message)
+async def broadcast_send(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("Yuborilmoqda...")
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT telegram_id FROM users")
+    count = 0
+    for u in users:
+        try:
+            await bot.send_message(u['telegram_id'], message.text)
+            count += 1
+            await asyncio.sleep(0.05)
+        except: pass
+    await message.answer(f"✅ Yuborildi: {count} ta", reply_markup=admin_kb())
+
 async def main():
     if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
+    clean_download_dir()
     await init_db()
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     await dp.start_polling(bot)
