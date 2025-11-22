@@ -394,13 +394,11 @@ async def process(call: types.CallbackQuery, state: FSMContext):
         
         # --- KONVERTATSIYA PARAMETRLARINI YANGILASH ---
         if fmt == "WAV":
-            # WAV uchun odatiy PCM format
             params = ["-acodec", "pcm_s16le"]
         elif fmt == "M4A":
-            # M4A uchun aniq AAC kodekini talab qilish
-            params = ["-c:a", "aac", "-b:a", "192k"] 
+            # YECHIM: Output formatini MP4 ga o'zgartirish va AAC kodekini saqlab qolish
+            params = ["-f", "mp4", "-c:a", "aac", "-b:a", "192k"] 
         else:
-            # FLAC, AIFF, MP3, OGG uchun format nomiga tayanib, pydub ning o'zi hal qilsin
             params = None 
 
         audio.export(out_path, format=ext, parameters=params)
