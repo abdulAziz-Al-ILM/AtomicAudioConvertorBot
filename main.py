@@ -413,14 +413,14 @@ async def process(call: types.CallbackQuery, state: FSMContext):
         audio.export(out_path, format=ext, parameters=params)
         
         res = FSInputFile(out_path)
-        
-        # 1. Konvertatsiya qilingan faylni yuborish
         caption_text = f"✅ {fmt}"
         
-        if fmt in ['MP4', 'OGG']: 
-            await bot.send_document(call.from_user.id, res, caption=caption_text)
-        else: 
+        # MP3 va OGG ni standart audio pleyer sifatida yuboramiz
+        if fmt in ['MP3', 'OGG']:
             await bot.send_audio(call.from_user.id, res, caption=caption_text)
+        # Boshqa formatlar (WAV, FLAC, M4A, AIFF) Document (Hujjat) sifatida yuboriladi
+        else: 
+            await bot.send_document(call.from_user.id, res, caption=caption_text)
         
         # 2. Maxsus Stikerni/Faylni yuborish (send_sticker o'rniga send_document ishlatiladi)
         await bot.send_document(call.from_user.id, STICKER_ID) 
