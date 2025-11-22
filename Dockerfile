@@ -15,4 +15,4 @@ COPY . .
 # Fayllar tushadigan papka
 RUN mkdir -p converts
 
-CMD ["python", "converter_bot.py"]
+CMD ["python", "main.py"]
