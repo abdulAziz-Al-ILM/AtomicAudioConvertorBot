@@ -258,8 +258,8 @@ async def buy_menu(message: types.Message):
     price_plus = apply_discount(BASE_PRICE_PLUS, disc) / 100
     price_pro = apply_discount(BASE_PRICE_PRO, disc) / 100
     
-    kb.button(text=f"🌟 PLUS ({int(price_plus)} 000 uzs)", callback_data="buy_plus")
-    kb.button(text=f"🚀 PRO ({int(price_pro)}000 uzs)", callback_data="buy_pro")
+    kb.button(text=f"🌟 PLUS ({int(price_plus)} uzs)", callback_data="buy_plus")
+    kb.button(text=f"🚀 PRO ({int(price_pro)} uzs)", callback_data="buy_pro")
     kb.adjust(1)
     
     msg = f"🎉 **{disc}% CHEGIRMA!**\n" if disc > 0 else ""
