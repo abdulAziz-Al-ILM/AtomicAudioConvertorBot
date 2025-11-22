@@ -23,7 +23,14 @@ DOWNLOAD_DIR = "converts"
 
 # FORMATLAR, LIMITLAR
 TARGET_FORMATS = ["MP3", "WAV", "FLAC", "OGG", "M4A", "AIFF"]
-FORMAT_EXTENSIONS = {f: f.lower() for f in TARGET_FORMATS}
+FORMAT_EXTENSIONS = {
+    "MP3": "mp3",
+    "OGG": "ogg",
+    "WAV": "wav",
+    "FLAC": "flac",
+    "M4A": "mp4", # YANGI: Fayl kengaytmasini mp4 ga o'zgartiramiz
+    "AIFF": "aiff"
+}
 THROTTLE_CACHE = {} 
 THROTTLE_LIMIT = 15 
 LIMITS = {
@@ -396,10 +403,12 @@ async def process(call: types.CallbackQuery, state: FSMContext):
         if fmt == "WAV":
             params = ["-acodec", "pcm_s16le"]
         elif fmt == "M4A":
-            # YECHIM: Output formatini MP4 ga o'zgartirish va AAC kodekini saqlab qolish
-            params = ["-f", "mp4", "-c:a", "aac", "-b:a", "192k"] 
+            # YECHIM: Faqat AAC kodekini belgilaymiz. Fayl kengaytmasini (.mp4) yuqorida aniqladik.
+            params = ["-c:a", "aac", "-b:a", "192k"] 
         else:
             params = None 
+
+        audio.export(out_path, format=ext, parameters=params)
 
         audio.export(out_path, format=ext, parameters=params)
         
