@@ -18,7 +18,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "SIZNING_BOT_TOKEN")
 PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "CLICK_TOKEN") 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@host/dbname") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
-
+STICKER_ID = "AgACAgIAAxkBAAPMaSG1dUR9Eg3Q6COAMXZPxRm85FoAAjcNaxtepBFJPJ5VbDHiP7ABAAMCAAN5AAM2BA" # YANGI QO'SHILDI
 DOWNLOAD_DIR = "converts"
 
 # FORMATLAR, LIMITLAR
@@ -224,7 +224,7 @@ async def start(message: types.Message):
         except ValueError: referrer_id = None
 
     await register_user(message.from_user.id, referrer_id)
-    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n[ ΛTOMIC ] taqdim etadi. \n[ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz. \n 🌟 Plus  va  🚀 Pro bilan yanada keng imkoniyatlarga ega bo'ling. \n\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
+    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n🔘 [ ΛTOMIC ] taqdim etadi. \n🔘 [ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz. \n 🌟 Plus  va  🚀 Pro bilan yanada keng imkoniyatlarga ega bo'ling. \n\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
 
 @dp.message(F.text == "📢 Reklama")
 async def ads_handler(message: types.Message):
@@ -395,6 +395,8 @@ async def process(call: types.CallbackQuery, state: FSMContext):
         res = FSInputFile(out_path)
         if fmt in ['MP4', 'OGG']: await bot.send_document(call.from_user.id, res, caption=f"✅ {fmt}")
         else: await bot.send_audio(call.from_user.id, res, caption=f"✅ {fmt}")
+        # 2. Maxsus Stikerni yuborish (YANGI QISM)
+        await bot.send_sticker(call.from_user.id, STICKER_ID)
         await update_usage(call.from_user.id)
         os.remove(out_path)
     except: await call.message.edit_text("❌ Konvertatsiya xatosi.")
