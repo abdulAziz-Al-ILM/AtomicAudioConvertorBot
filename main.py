@@ -33,7 +33,7 @@ THROTTLE_LIMIT = 15
 
 # LIMITLAR VA NARXLAR
 LIMITS = {
-    "free": {"daily": 5, "duration": 20},     # 20 soniya
+    "free": {"daily": 3, "duration": 20},     # 20 soniya
     "plus": {"daily": 15, "duration": 120},   # 2 daqiqa
     "pro": {"daily": 30, "duration": 480}     # 8 daqiqa
 }
@@ -138,10 +138,10 @@ async def stats(message: types.Message):
 @dp.message(F.text == "🌟 Obuna olish")
 async def buy_menu(message: types.Message):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌟 PLUS (15k)", callback_data="buy_plus")
-    kb.button(text="🚀 PRO (30k)", callback_data="buy_pro")
+    kb.button(text="🌟 PLUS (15 000 uzs)", callback_data="buy_plus")
+    kb.button(text="🚀 PRO (30 000 uzs)", callback_data="buy_pro")
     kb.adjust(1)
-    await message.answer("📦 **Tarifni tanlang:**\n\n🌟 **PLUS** (15k/oy)\n• 15 ta fayl\n• 2 daqiqa\n\n🚀 **PRO** (30k/oy)\n• 30 ta fayl\n• 8 daqiqa", reply_markup=kb.as_markup())
+    await message.answer("📦 **Tarifni tanlang:**\n\n🌟 **PLUS** (15 000 uzs/oy)\n• 15 ta fayl\n• 2 daqiqa\n\n🚀 **PRO** (30 000 uzs/oy)\n• 30 ta fayl\n• 8 daqiqa", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def invoice(call: types.CallbackQuery):
