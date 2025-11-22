@@ -428,6 +428,16 @@ async def main():
     await init_db()
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     await dp.start_polling(bot)
+# --- main.py (Eng oxirgi handlerlar qismiga qo'shing) ---
 
+# Foydalanuvchi "🎵 Konvertatsiya" ni bosmasdan audio/fayl yuborsa, eslatma berish
+@dp.message(F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
+async def remind_user_to_start(message: types.Message):
+    # Bu handler faqat foydalanuvchi ConverterState.wait_audio holatida bo'lmasa ishlaydi.
+    await message.answer(
+        "Iltimos, avval asosiy menyudan **'🎵 Konvertatsiya'** tugmasini bosing, so'ngra faylni yuboring.",
+        reply_markup=main_kb()
+    )
+    
 if __name__ == "__main__":
     asyncio.run(main())
