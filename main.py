@@ -18,7 +18,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "SIZNING_BOT_TOKEN")
 PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "CLICK_TOKEN") 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@host/dbname") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
-STICKER_ID = "AgACAgIAAxkBAAPMaSG1dUR9Eg3Q6COAMXZPxRm85FoAAjcNaxtepBFJPJ5VbDHiP7ABAAMCAAN5AAM2BA" # YANGI QO'SHILDI
+STICKER_ID = "CAACAgIAAxkBAAP9aSHJxM6z4zT-Vegn72WrnxQHd9wAAoGHAALLFRBJXyjFQP42VdU2BA" # YANGI QO'SHILDI
 DOWNLOAD_DIR = "converts"
 
 # FORMATLAR, LIMITLAR
@@ -378,6 +378,7 @@ async def get_file(message: types.Message, state: FSMContext):
     await state.update_data(path=path)
     await message.answer("Formatni tanlang:", reply_markup=format_kb())
     await state.set_state(ConverterState.wait_format)
+    
 @dp.callback_query(ConverterState.wait_format, F.data.startswith("fmt_"))
 async def process(call: types.CallbackQuery, state: FSMContext):
     fmt = call.data.split("_")[1]
@@ -387,23 +388,47 @@ async def process(call: types.CallbackQuery, state: FSMContext):
     out_path = in_path.replace("_in", f"_out.{ext}")
     
     await call.message.edit_text(f"⏳ {fmt} ga o'girilmoqda...")
+    
     try:
         audio = AudioSegment.from_file(in_path)
-        params = ["-acodec", "pcm_s16le"] if fmt in ["WAV", "FLAC", "AIFF"] else None
+        
+        # --- KONVERTATSIYA PARAMETRLARINI YANGILASH ---
+        if fmt == "WAV":
+            # WAV uchun odatiy PCM format
+            params = ["-acodec", "pcm_s16le"]
+        elif fmt == "M4A":
+            # M4A uchun aniq AAC kodekini talab qilish
+            params = ["-c:a", "aac", "-b:a", "192k"] 
+        else:
+            # FLAC, AIFF, MP3, OGG uchun format nomiga tayanib, pydub ning o'zi hal qilsin
+            params = None 
+
         audio.export(out_path, format=ext, parameters=params)
         
         res = FSInputFile(out_path)
-        if fmt in ['MP4', 'OGG']: await bot.send_document(call.from_user.id, res, caption=f"✅ {fmt}")
-        else: await bot.send_audio(call.from_user.id, res, caption=f"✅ {fmt}")
-        # 2. Maxsus Stikerni yuborish (YANGI QISM)
-        await bot.send_sticker(call.from_user.id, STICKER_ID)
+        
+        # 1. Konvertatsiya qilingan faylni yuborish
+        caption_text = f"✅ {fmt}"
+        
+        if fmt in ['MP4', 'OGG']: 
+            await bot.send_document(call.from_user.id, res, caption=caption_text)
+        else: 
+            await bot.send_audio(call.from_user.id, res, caption=caption_text)
+        
+        # 2. Maxsus Stikerni/Faylni yuborish (send_sticker o'rniga send_document ishlatiladi)
+        await bot.send_document(call.from_user.id, STICKER_ID) 
+        
         await update_usage(call.from_user.id)
         os.remove(out_path)
-    except: await call.message.edit_text("❌ Konvertatsiya xatosi.")
+    except Exception as e:
+        # Xatolikni aniqroq ko'rsatish
+        await call.message.edit_text(f"❌ Konvertatsiya xatosi: {e}")
+        
     if os.path.exists(in_path): os.remove(in_path)
-    await call.message.delete()
+    if 'out_path' in locals() and os.path.exists(out_path): os.remove(out_path)
+    
     await state.clear()
-
+    
 # --- ADMIN PANEL ---
 @dp.message(Command('admin'))
 async def cmd_admin(message: types.Message):
