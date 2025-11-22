@@ -1,8 +1,9 @@
 import logging
 import os
+import time
+from aiogram.enums.content_type import ContentType
 import sys
 import asyncio
-import time
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command
@@ -311,11 +312,9 @@ async def req_audio(message: types.Message, state: FSMContext):
     await message.answer("Faylni yuboring (Audio/Video).")
     await state.set_state(ConverterState.wait_audio)
 
-# --- main.py (get_file funksiyasini TOPING va to'liq almashtiring) ---
-
-# --- main.py (get_file funksiyasini TOPING va to'liq almashtiring) ---
-
-@dp.message(ConverterState.wait_audio, F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
+@dp.message(ConverterState.wait_audio, F.content_type.in_([
+    ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT
+]))
 async def get_file(message: types.Message, state: FSMContext):
     
     # 🟢 DEBUG 1: Handlerga kirdi.
@@ -329,27 +328,33 @@ async def get_file(message: types.Message, state: FSMContext):
     
     if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
 
-    # 2. FAYL TURINI XAVFSIZ ANIQLASH
-    fid = None
-    ext = None
-    try:
-        if message.audio: 
-            fid, ext = message.audio.file_id, os.path.splitext(message.audio.file_name or "a.mp3")[-1]
-        elif message.voice: 
-            fid, ext = message.voice.file_id, ".ogg"
-        elif message.video: 
-            fid, ext = message.video.file_id, ".mp4"
-        elif message.document: 
-            fid, ext = message.document.file_id, os.path.splitext(message.document.file_name or "a.dat")[-1]
-        
-        if fid is None:
-             # Agar kontent turi aniqlangan lekin fid olinmagan bo'lsa (Masalan, surat)
-             error_msg = f"Noto'g'ri fayl turi aniqlandi! Content Type: {message.content_type}"
-             return await message.answer(error_msg)
-
-    except Exception as e:
-        # Fayl ID/Ext olishdagi har qanday kutilmagan xato
-        return await message.answer(f"❌ Fayl identifikatsiyasi xatosi: {e}") 
+    # 2. FAYL OBJEKTINI VA ID NI XAVFSIZ ANIQLASH (Soddalashtirildi)
+    
+    file_obj = message.audio or message.voice or message.video or message.document
+    
+    # Agar kontent turi boru, lekin file_obj None bo'lsa (bu nazariy jihatdan mumkin emas)
+    if not file_obj:
+        return await message.answer("❌ Fayl topilmadi yoki noto'g'ri format.")
+    
+    fid = file_obj.file_id
+    
+    # Kengaytmani xavfsiz aniqlash
+    if message.voice:
+        # Voice (OGG)
+        ext = ".ogg"
+    elif message.audio and file_obj.file_name:
+        # Audio (MP3/WAV/etc)
+        ext = os.path.splitext(file_obj.file_name)[-1]
+    elif message.video:
+        # Video (MP4/MOV/etc)
+        ext = ".mp4"
+    elif message.document and file_obj.file_name:
+        # Document (barcha qolgan turlar)
+        ext = os.path.splitext(file_obj.file_name)[-1]
+    else:
+        # Default o'laroq, yuklab olish uchun o'zimiz xohlagan kengaytmani qo'yamiz
+        # Uni pydub keyin baribir to'g'ri o'qishi kerak
+        ext = ".dat" 
 
     path = os.path.join(DOWNLOAD_DIR, f"{fid}_in{ext}")
     
@@ -357,6 +362,8 @@ async def get_file(message: types.Message, state: FSMContext):
     await message.answer(f"📥 Yuklanmoqda... Tur: {ext}") 
     
     # 3. FAYLNI YUKLASH VA LIMIT TEKSHIRISH
+    
+    # Agar yuklashda xato bo'lsa, tozalash uchun try/finally ishlatamiz
     try:
         file = await bot.get_file(fid)
         await bot.download_file(file.file_path, path)
@@ -364,15 +371,22 @@ async def get_file(message: types.Message, state: FSMContext):
         # Limitlarni tekshirish
         status, _, _, _ = await check_limits(uid)
         
-        # PyDub bilan uzunlikni tekshirish
+        # PyDub bilan uzunlikni tekshirish (Video va notanish audio fayllar ham kiradi)
+        # ⚠️ NOTE: Bu yerda pydub/ffmpeg faqat audioni o'qishga harakat qiladi
+        
         try:
+            # Agar fayl video bo'lsa ham, AudioSegment birinchi audio streamni o'qiydi
             segment = AudioSegment.from_file(path)
             dur = len(segment) / 1000
         except Exception:
-             os.remove(path)
-             return await message.answer("❌ Fayl sifati past yoki buzilgan.")
+            # Fayl buzilgan, video audio streamsiz, yoki FFmpeg o'qiy olmadi
+            os.remove(path)
+            # return await message.answer("❌ Fayl sifati past, buzilgan yoki format qo'llab-quvvatlanmaydi.")
+            # Qattiq cheklovdan ko'ra, davom etishga imkon beramiz (agar konversiyada xato bo'lsa, keyinroq ushlaymiz)
+            dur = 0 # Agar uzunlikni o'qiy olmasa, 0 deb hisoblaymiz (limit cheklovidan o'tadi)
 
-        if dur > LIMITS[status]['duration']:
+
+        if dur > LIMITS[status]['duration'] and dur != 0:
             os.remove(path)
             return await message.answer(f"⚠️ Limit: {LIMITS[status]['duration']}s. Fayl: {int(dur)}s")
             
