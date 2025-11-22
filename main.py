@@ -304,9 +304,16 @@ async def req_audio(message: types.Message, state: FSMContext):
     await message.answer("Faylni yuboring (Audio/Video).")
     await state.set_state(ConverterState.wait_audio)
 
+# --- main.py (get_file funksiyasini TOPING va to'liq almashtiring) ---
+
 @dp.message(ConverterState.wait_audio, F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
 async def get_file(message: types.Message, state: FSMContext):
+    
+    # 🟢 DEBUG 1: Handlerga kirdi.
+    await message.answer("➡️ Handler ichiga kirdi, tekshirilmoqda...") 
+    
     uid = message.from_user.id
+    # 1. THROTTLING CHECK
     if uid in THROTTLE_CACHE and (now - THROTTLE_CACHE[uid]) < THROTTLE_LIMIT:
         wait = int(THROTTLE_LIMIT - (now - THROTTLE_CACHE[uid]))
         return await message.answer(f"✋ Shoshmang do'stim, yana {wait} soniya kuting.")
@@ -314,26 +321,49 @@ async def get_file(message: types.Message, state: FSMContext):
     
     if not os.path.exists(DOWNLOAD_DIR): os.makedirs(DOWNLOAD_DIR)
 
+    # 2. FAYL TURINI ANIQLASH
     if message.audio: fid, ext = message.audio.file_id, os.path.splitext(message.audio.file_name or "a.mp3")[-1]
     elif message.voice: fid, ext = message.voice.file_id, ".ogg"
     elif message.video: fid, ext = message.video.file_id, ".mp4"
     elif message.document: fid, ext = message.document.file_id, os.path.splitext(message.document.file_name or "a.dat")[-1]
-    else: return await message.answer("Noto'g'ri fayl.")
+    else: 
+        # ⚠️ DEBUG 2: Fayl turi mos kelmadi.
+        error_msg = f"Noto'g'ri fayl turi! Content Type: {message.content_type}"
+        return await message.answer(error_msg)
 
     path = os.path.join(DOWNLOAD_DIR, f"{fid}_in{ext}")
-    await message.answer("📥 Yuklanmoqda...")
+    
+    # 🟢 DEBUG 3: Fayl turini to'g'ri aniqladi.
+    await message.answer(f"📥 Yuklanmoqda... Tur: {ext}") 
+    
+    # 3. FAYLNI YUKLASH VA LIMIT TEKSHIRISH
     try:
         file = await bot.get_file(fid)
         await bot.download_file(file.file_path, path)
+        
+        # Limitlarni tekshirish uchun faylni PyDub yordamida yuklab olish kerak
         status, _, _, _ = await check_limits(uid)
-        dur = len(AudioSegment.from_file(path)) / 1000
+        
+        # ⚠️ PyDub xato berishi mumkin
+        try:
+            segment = AudioSegment.from_file(path)
+            dur = len(segment) / 1000
+        except Exception:
+             # Agar PyDub o'qiy olmasa
+             os.remove(path)
+             return await message.answer("❌ Fayl sifati past yoki buzilgan. Konvertatsiya qilish imkonsiz.")
+
+
         if dur > LIMITS[status]['duration']:
             os.remove(path)
             return await message.answer(f"⚠️ Limit: {LIMITS[status]['duration']}s. Fayl: {int(dur)}s")
+            
     except Exception as e:
+        # Yuklashdagi umumiy xato
         if os.path.exists(path): os.remove(path)
-        return await message.answer(f"❌ Xatolik: {e}")
+        return await message.answer(f"❌ Yuklashda Xatolik: {e}")
 
+    # 4. FORMATNI TANLASHGA O'TISH
     await state.update_data(path=path)
     await message.answer("Formatni tanlang:", reply_markup=format_kb())
     await state.set_state(ConverterState.wait_format)
