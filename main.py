@@ -9,7 +9,8 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.types import FSInputFile, LabeledPrice, PreCheckoutQuery
+# TUZATISH: ContentType qo'shildi 👇
+from aiogram.types import FSInputFile, LabeledPrice, PreCheckoutQuery, ContentType
 import aiosqlite
 from pydub import AudioSegment
 
@@ -32,7 +33,7 @@ THROTTLE_LIMIT = 15
 
 # LIMITLAR VA NARXLAR
 LIMITS = {
-    "free": {"daily": 3, "duration": 20},     # 20 soniya
+    "free": {"daily": 5, "duration": 20},     # 20 soniya
     "plus": {"daily": 15, "duration": 120},   # 2 daqiqa
     "pro": {"daily": 30, "duration": 480}     # 8 daqiqa
 }
@@ -125,7 +126,7 @@ def format_kb():
 @dp.message(CommandStart())
 async def start(message: types.Message):
     await register_user(message.from_user.id)
-    await message.answer(f"Salom, {message.from_user.first_name}!\n**ΛTOMIC • Audio Converter** ga xush kelibsiz.", reply_markup=main_kb())
+    await message.answer(f"Salom, {message.from_user.first_name}!\n** ΛTOMIC • Audio Converter ** ga xush kelibsiz. \\\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
 
 @dp.message(F.text == "📊 Statistika")
 async def stats(message: types.Message):
@@ -171,7 +172,12 @@ async def req_audio(message: types.Message, state: FSMContext):
         return await message.answer(f"😔 Limit tugadi ({usage}/{max_limit}). Obuna oling.")
     await message.answer("Audio, Video yoki Ovozli xabar yuboring.")
     await state.set_state(ConverterState.wait_audio)
+    
+@dp.message(F.text == "📢 Reklama")
+async def ads_handler(message: types.Message):
+    await message.answer(f"Reklama bo'yicha adminga murojaat qiling: @Al_Abdul_Aziz")
 
+# XATO SHU YERDA EDI, TUZATILDI 👇
 @dp.message(ConverterState.wait_audio, F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
 async def get_file(message: types.Message, state: FSMContext):
     uid = message.from_user.id
@@ -206,15 +212,11 @@ async def get_file(message: types.Message, state: FSMContext):
             
     except Exception as e:
         if os.path.exists(path): os.remove(path)
-        return await message.answer("❌ Xatolik.")
+        return await message.answer(f"❌ Xatolik: {e}")
 
     await state.update_data(path=path)
     await message.answer("Formatni tanlang:", reply_markup=format_kb())
     await state.set_state(ConverterState.wait_format)
-
-@dp.message(F.text == "📢 Reklama")
-async def ads_handler(message: types.Message):
-    await message.answer(f"Reklama bo'yicha adminga murojaat qiling: @Al_Abdul_Aziz")
 
 @dp.callback_query(ConverterState.wait_format, F.data.startswith("fmt_"))
 async def process(call: types.CallbackQuery, state: FSMContext):
