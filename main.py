@@ -224,7 +224,7 @@ async def start(message: types.Message):
         except ValueError: referrer_id = None
 
     await register_user(message.from_user.id, referrer_id)
-    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n[ ΛTOMIC ] taqdim etadi. \n[ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz. \n 🌟 Plus  va  🚀 Pro bilan yanada keng imkoniyatlarga ega bo'ling. \\\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
+    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n[ ΛTOMIC ] taqdim etadi. \n[ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz. \n 🌟 Plus  va  🚀 Pro bilan yanada keng imkoniyatlarga ega bo'ling. \n\n Foydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
 
 @dp.message(F.text == "📢 Reklama")
 async def ads_handler(message: types.Message):
@@ -469,7 +469,32 @@ async def main():
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     await dp.start_polling(bot)
 # --- main.py (Eng oxirgi handlerlar qismiga qo'shing) ---
+# --- main.py (Boshqa handlerlar tugagan joyga qo'shing) ---
 
+@dp.message(F.content_type.in_([ContentType.PHOTO, ContentType.STICKER, ContentType.DOCUMENT]))
+async def get_file_id_temp(message: types.Message):
+    """Foydalanuvchi yuborgan rasm, stiker yoki hujjatning File ID'sini qaytaradi."""
+    
+    file_id = None
+    file_type = "Noma'lum"
+
+    if message.photo:
+        # Eng yuqori sifatli rasmni olamiz (oxirgi element)
+        file_id = message.photo[-1].file_id
+        file_type = "RASM"
+    elif message.sticker:
+        file_id = message.sticker.file_id
+        file_type = "STIKER"
+    elif message.document:
+        file_id = message.document.file_id
+        file_type = "HUJJAT"
+    else:
+        return # Agar boshqa turdagi kontent bo'lsa, indamaymiz
+        
+    await message.answer(
+        f"✅ Fayl turi: {file_type}\n\n🆔 Fayl ID:\n`{file_id}`\n\n⚠️ Eslatma: Bu xabarni olgandan so'ng, ushbu kodni o'chirishingiz kerak.", 
+        parse_mode="Markdown"
+    )
 # Foydalanuvchi "🎵 Konvertatsiya" ni bosmasdan audio/fayl yuborsa, eslatma berish
 @dp.message(F.content_type.in_([ContentType.AUDIO, ContentType.VOICE, ContentType.VIDEO, ContentType.DOCUMENT]))
 async def remind_user_to_start(message: types.Message):
