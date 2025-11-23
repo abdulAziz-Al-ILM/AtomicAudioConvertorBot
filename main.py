@@ -442,8 +442,8 @@ async def admin_stats(message: types.Message):
 @dp.message(F.text == "🏷 Chegirma o'rnatish", F.from_user.id == ADMIN_ID)
 async def admin_disc_ask(message: types.Message, state: FSMContext):
     await message.answer("Chegirma foizini kiriting (0 - 100):", reply_markup=ReplyKeyboardBuilder().button(text="🔙 Chiqish").as_markup(resize_keyboard=True))
-    await state.set_state(AdminState.waiting_discount)
-@dp.message(AdminState.waiting_discount, F.from_user.id == ADMIN_ID)
+    await state.set_state(AdminState.wait_discount)
+@dp.message(AdminState.wait_discount, F.from_user.id == ADMIN_ID)
 async def admin_disc_set(message: types.Message, state: FSMContext):
     if message.text == "🔙 Chiqish":
         await state.clear()
