@@ -460,7 +460,7 @@ async def admin_disc_set(message: types.Message, state: FSMContext):
 @dp.message(F.text == "✉️ Xabar yuborish", F.from_user.id == ADMIN_ID)
 async def admin_cast_ask(message: types.Message, state: FSMContext):
     await message.answer("Xabarni kiriting:", reply_markup=ReplyKeyboardBuilder().button(text="🔙 Chiqish").as_markup(resize_keyboard=True))
-    await state.set_state(AdminState.waiting_broadcast)
+    await state.set_state(AdminState.wait_broadcast)
 
 @dp.message(AdminState.wait_broadcast, F.from_user.id == ADMIN_ID)
 async def admin_cast_send(message: types.Message, state: FSMContext):
