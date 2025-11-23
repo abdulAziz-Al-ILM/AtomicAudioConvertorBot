@@ -231,6 +231,9 @@ class AdminState(StatesGroup):
     wait_message = State()
     wait_discount = State()
     get_discount = State()
+    set_discount_db = State()
+    init_db = State()
+    get_total_revenue = State()
     wait_broadcast = State()
 
 def main_kb():
