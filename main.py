@@ -431,6 +431,56 @@ async def cmd_admin(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Admin Panel", reply_markup=admin_kb())
 
+@dp.message(F.text == "📈 Admin Stats", F.from_user.id == ADMIN_ID)
+async def admin_stats(message: types.Message):
+    async with db_pool.acquire() as conn:
+        cnt = await conn.fetchval("SELECT COUNT(*) FROM users")
+    disc = await get_discount()
+    revenue = await get_total_revenue()
+    await message.answer(f"📊 **Statistika:**\n\n👥 Jami foydalanuvchilar: **{cnt}**\n💰 Jami Daromad: **{revenue:,.0f} UZS**\n🏷 Joriy chegirma: **{disc}%**")
+
+@dp.message(F.text == "🏷 Chegirma o'rnatish", F.from_user.id == ADMIN_ID)
+async def admin_disc_ask(message: types.Message, state: FSMContext):
+    await message.answer("Chegirma foizini kiriting (0 - 100):", reply_markup=ReplyKeyboardBuilder().button(text="🔙 Chiqish").as_markup(resize_keyboard=True))
+    await state.set_state(AdminState.waiting_discount)
+@dp.message(AdminState.waiting_discount, F.from_user.id == ADMIN_ID)
+async def admin_disc_set(message: types.Message, state: FSMContext):
+    if message.text == "🔙 Chiqish":
+        await state.clear()
+        return await message.answer("Admin panel:", reply_markup=admin_kb())
+    if message.text.isdigit():
+        perc = int(message.text)
+        if 0 <= perc <= 100:
+            await set_discount_db(perc)
+            await message.answer(f"✅ Chegirma {perc}% etib belgilandi!", reply_markup=admin_kb())
+            await state.clear()
+        else: await message.answer("0-100 orasi bo'lsin.")
+    else: await message.answer("Raqam kiriting.")
+
+@dp.message(F.text == "✉️ Xabar yuborish", F.from_user.id == ADMIN_ID)
+async def admin_cast_ask(message: types.Message, state: FSMContext):
+    await message.answer("Xabarni kiriting:", reply_markup=ReplyKeyboardBuilder().button(text="🔙 Chiqish").as_markup(resize_keyboard=True))
+    await state.set_state(AdminState.waiting_broadcast)
+
+@dp.message(AdminState.waiting_broadcast, F.from_user.id == ADMIN_ID)
+async def admin_cast_send(message: types.Message, state: FSMContext):
+    if message.text == "🔙 Chiqish":
+        await state.clear()
+        return await message.answer("Admin panel:", reply_markup=admin_kb())
+    await message.answer("⏳ Yuborilmoqda...")
+    count = 0
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT telegram_id FROM users")
+        for row in users:
+            try:
+                # O'zgartirishlar: copy_to bilan xabarni yuborish
+                await message.copy_to(row['telegram_id'])
+                count += 1
+                await asyncio.sleep(0.05)
+            except: pass
+    await message.answer(f"✅ {count} kishiga yuborildi!", reply_markup=admin_kb())
+    await state.clear()
+
 # ... (Qolgan Admin handlerlar avvalgidek) ...
 
 async def main():
