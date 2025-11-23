@@ -277,7 +277,7 @@ async def start(message: types.Message):
         except ValueError: referrer_id = None
 
     await register_user(message.from_user.id, referrer_id)
-    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n🔘 [] ΛTOMIC [] taqdim etadi \n🔘 [ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz! \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. \n\n\nFoydalanish qoidalari [ToU] bilan tanishing: https://t.me/c/3045532631/6", reply_markup=main_kb())
+    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n🔘 [] ΛTOMIC [] taqdim etadi \n🔘 [ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz! \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. \n\n\nFoydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
 
 @dp.message(F.text == "📊 Statistika")
 async def stats(message: types.Message):
