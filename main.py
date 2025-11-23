@@ -230,6 +230,7 @@ class ConverterState(StatesGroup):
 class AdminState(StatesGroup):
     wait_message = State()
     wait_discount = State()
+    get_discount = State()
     wait_broadcast = State()
 
 def main_kb():
