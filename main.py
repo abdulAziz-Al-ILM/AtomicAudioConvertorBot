@@ -431,7 +431,7 @@ async def cmd_admin(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Admin Panel", reply_markup=admin_kb())
 
-@dp.message(F.text == "📈 Admin Stats", F.from_user.id == ADMIN_ID)
+@dp.message(F.text == "📈 Statistika", F.from_user.id == ADMIN_ID)
 async def admin_stats(message: types.Message):
     async with db_pool.acquire() as conn:
         cnt = await conn.fetchval("SELECT COUNT(*) FROM users")
@@ -445,7 +445,7 @@ async def admin_disc_ask(message: types.Message, state: FSMContext):
     await state.set_state(AdminState.wait_discount)
 @dp.message(AdminState.wait_discount, F.from_user.id == ADMIN_ID)
 async def admin_disc_set(message: types.Message, state: FSMContext):
-    if message.text == "🔙 Chiqish":
+    if message.text == "❌ Asosiy menyu":
         await state.clear()
         return await message.answer("Admin panel:", reply_markup=admin_kb())
     if message.text.isdigit():
@@ -462,7 +462,7 @@ async def admin_cast_ask(message: types.Message, state: FSMContext):
     await message.answer("Xabarni kiriting:", reply_markup=ReplyKeyboardBuilder().button(text="🔙 Chiqish").as_markup(resize_keyboard=True))
     await state.set_state(AdminState.waiting_broadcast)
 
-@dp.message(AdminState.waiting_broadcast, F.from_user.id == ADMIN_ID)
+@dp.message(AdminState.wait_broadcast, F.from_user.id == ADMIN_ID)
 async def admin_cast_send(message: types.Message, state: FSMContext):
     if message.text == "🔙 Chiqish":
         await state.clear()
