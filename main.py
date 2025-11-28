@@ -282,7 +282,7 @@ async def start(message: types.Message):
         except ValueError: referrer_id = None
 
     await register_user(message.from_user.id, referrer_id)
-    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n🔘 [] ΛTOMIC [] taqdim etadi \n🔘 [ ΛTOMIC • Λudio Convertor ] ga xush kelibsiz! \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. \n\n\nFoydalanish qoidalari (ToU) bilan tanishing: https://t.me/Atomic_Online_Services/5", reply_markup=main_kb())
+    await message.answer(f"Assalamu alaykum, {message.from_user.first_name}!\n🔘 [] ΛTOMIC [] taqdim etadi \n🔘 [ Audio Convertor Bot [] ΛTOMIC ] ga xush kelibsiz! \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. \n\n\nFoydalanish qoidalari (ToU) bilan tanishing: https://t.me/Online_Services_Atomic/5", reply_markup=main_kb())
 
 @dp.message(F.text == "📊 Statistika")
 async def stats(message: types.Message):
@@ -327,7 +327,7 @@ async def checkout(q: PreCheckoutQuery):
     
 @dp.message(F.text == "ℹ️ Yordam")
 async def help_msg(message: types.Message):
-    await message.answer("Yordam kerakmi? Botdan foydalanish juda oson 😊 \n1. Konvertatsiya tugmasini bosasiz \n2. ovozli xabar, audio fayl yoki video yuborasiz \n3. Konvertatsiya qilinishi kerak bo'lgan formatni tanlaysiz \n4. QArabsizku sizda kerak bo'lgan bo'lgan audio formati tayyor \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. ")
+    await message.answer("Yordam kerakmi? Botdan foydalanish juda oson 😊 \n1. Konvertatsiya tugmasini bosasiz \n2. ovozli xabar, audio fayl yoki video yuborasiz \n3. Konvertatsiya qilinishi kerak bo'lgan formatni tanlaysiz \n4. Qarabsizku sizda kerak bo'lgan bo'lgan audio formati tayyor \n🌟 Plus va 🚀 Pro obunasi bilan yanada keng imkoniyatga ega bo'ling. ")
     
 @dp.message(F.successful_payment)
 async def paid(message: types.Message):
